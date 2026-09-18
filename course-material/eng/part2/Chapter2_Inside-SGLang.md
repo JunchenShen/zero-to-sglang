@@ -2,7 +2,7 @@
 
 The previous chapter introduced the modules that make up an inference engine. This chapter follows one request to see how they fit together. The main pieces to distinguish are **the tokenizer, the scheduler, the engine (including the attention backend, forward pass, and memory allocation), and the serving frontend.** For now, knowing roughly what each module does is enough.
 
-We will first cover the request path and how the work is divided across processes. Commands, message types, and a source walkthrough are in the companion [coding document](./Chapter2_Coding_Inside-SGLang.md). In the next chapter, we will implement the forward pass and generation loop ourselves.
+We will first cover the request path and how the work is divided across processes. Commands, message types, and a source walkthrough are in the companion [coding document](./Chapter2_Inside-SGLang_code.md). In the next chapter, we will implement the forward pass and generation loop ourselves.
 
 ## 1 Learning Objectives
 
@@ -103,7 +103,7 @@ Before moving on, check whether you can name two tasks that can overlap, explain
 
 1. The request path. A request passes through the API Server, tokenizer, scheduler and engine, and detokenizer before the API Server returns the result. The request identifier connects state across the stages. The tokenizer and detokenizer convert between text and tokens; the scheduler manages execution order and resources; the engine runs the forward pass and sampling.
 
-2. The benefits of multiple processes. Separating components lets their work overlap and provides clearer boundaries for scaling and debugging. **System design always involves tradeoffs; there is no perfect design.** Multiple processes also bring communication and synchronization costs. Next, read the [coding document](./Chapter2_Coding_Inside-SGLang.md) to find these responsibilities in the source.
+2. The benefits of multiple processes. Separating components lets their work overlap and provides clearer boundaries for scaling and debugging. **System design always involves tradeoffs; there is no perfect design.** Multiple processes also bring communication and synchronization costs. Next, read the [coding document](./Chapter2_Inside-SGLang_code.md) to find these responsibilities in the source.
 
 ### 4.2 Exercises
 

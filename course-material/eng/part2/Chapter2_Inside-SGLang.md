@@ -37,7 +37,7 @@ The model first processes the prompt, a stage called prefill. It then enters dec
 
 The engine performs the actual model forward pass and sampling. The scheduler decides which requests to compute; the engine carries out that computation. In mini-sglang, they run in the same process, and the scheduler calls the engine directly. A module boundary does not necessarily mean a process boundary.
 
-The forward pass produces logits: scores for candidate tokens in the vocabulary. The sampler selects the next token from these scores. Greedy decoding picks the highest-scoring candidate; random sampling builds a probability distribution according to the sampling parameters and draws from it. The selected token is appended to the request's sequence and becomes part of the context for the next step.
+The forward pass produces logits: scores for candidate tokens in the vocabulary, not yet probabilities. The sampler selects the next token from these scores. Greedy decoding directly picks the highest-scoring candidate; random sampling with temperature first adjusts the logits, applies softmax to turn them into probabilities, and draws from that distribution. The selected token is appended to the request's sequence and becomes part of the context for the next step.
 
 ### 2.4 The detokenizer converts tokens back into text
 
@@ -53,30 +53,9 @@ When the request reaches its generation limit or another stopping condition, gen
 
 ### 2.6 Putting the path together
 
-The sequence diagram below shows mini-sglang's request flow. The scheduler and engine are drawn separately to make their responsibilities clear, but the call between them stays within one process.
+The figure puts the request-handling modules together. Both ends represent the same API Server. The scheduler and engine share a box because they run in one process and communicate through function calls. Each new token from the generation loop goes to the detokenizer, and the frontend returns the new text.
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant A as API Server frontend
-    participant T as tokenizer
-    participant S as scheduler
-    participant E as engine
-    participant D as detokenizer
-
-    U->>A: Text + generation parameters
-    A->>T: Text + request ID
-    T->>S: Token IDs + request ID
-    Note over S: New request enters the waiting queue
-    loop Schedule and generate until the request finishes
-        S->>E: Assembled batch
-        E-->>S: New token for each request
-        S->>D: New token + request ID + completion status
-        D->>A: New text + request ID + completion status
-        A-->>U: SSE chunk
-    end
-    A-->>U: Complete the streaming response
-```
+<img src="./images/2-1-request-flow.png" width="800" alt="A request passes from the API Server through the tokenizer to the scheduler and engine; generated tokens pass through the detokenizer back to the same API Server, while the scheduler and engine loop within one process">
 
 There are three main transformations: the input text becomes token IDs, the model generates new tokens from the context, and the detokenizer turns those output tokens back into text. The request identifier stays with the request throughout, allowing every stage to associate its work with the same request.
 

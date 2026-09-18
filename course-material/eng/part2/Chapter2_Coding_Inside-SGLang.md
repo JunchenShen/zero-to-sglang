@@ -199,12 +199,29 @@ Inside `engine.forward_batch`, the model first computes logits, the sampler choo
 # engine/engine.py (simplified)
 def forward_batch(self, batch, args):
     logits = self.model.forward()                     # Score the candidate tokens
-    next_tokens = self.sampler.sample(logits, args)   # Sample a token
+    next_tokens = self.sampler.sample(logits, args)   # Handles softmax and token selection internally
     next_tokens_cpu = next_tokens.to("cpu", non_blocking=True)   # Copy to the CPU
     ...
 ```
 
-Think of logits as the model's scores for the candidate tokens in its vocabulary, not yet probabilities. Greedy decoding picks the highest score directly. Sampling with temperature adjusts the scores, converts them into probabilities, and draws a token. We will look more closely at these steps when we implement the forward pass and generation loop in the next chapter.
+Logits are the model's scores for candidate tokens in its vocabulary, not yet probabilities. Softmax turns those scores into probabilities that sum to 1. How we choose the next token depends on the sampling method: greedy takes the highest-scoring token directly; random sampling with temperature first scales the logits, then applies softmax, and finally draws a token according to the resulting probabilities.
+
+The `sample(logits, args)` call above handles these steps internally; it does not treat logits as probabilities and draw from them directly. Open [`engine/sample.py`](https://github.com/sgl-project/mini-sglang/blob/main/python/minisgl/engine/sample.py), and the logic inside that call can be simplified as follows. Here, `sampling` refers to `flashinfer.sampling`; branches such as top-k and top-p are omitted:
+
+```python
+# engine/sample.py (simplified, combining sample and sample_impl)
+def sample(self, logits, args):
+    if args.temperatures is None:                      # The entire batch uses greedy
+        return torch.argmax(logits, dim=-1)
+    probs = sampling.softmax(logits.float(), args.temperatures)  # Temperature scaling + softmax
+    return sampling.sampling_from_probs(probs)         # Draw a token from the probabilities
+```
+
+Greedy does not need to compute softmax: softmax preserves the ranking of scores, so taking the largest logit selects the same token. Random sampling needs a probability distribution. The figure separates these two paths:
+
+<img src="./images/2-2-logits-and-sampling.png" width="800" alt="Logits either go directly through greedy argmax or through temperature scaling and softmax followed by a probability-based draw to select the next token">
+
+The random-sampling path shows temperature and softmax only, leaving out top-k and top-p. We will look more closely at these steps when we implement the forward pass and generation loop in the next chapter.
 
 To read further, model definitions are in `models/`, and attention implementations are in `attention/`. The engine also includes optimizations such as CUDA Graph and asynchronous copies; we will leave those aside for now.
 
@@ -264,4 +281,5 @@ The uid is a useful thread to follow through this code because it stays the same
 
 - [mini-sglang source](https://github.com/sgl-project/mini-sglang)
 - [mini-sglang architecture](https://github.com/sgl-project/mini-sglang/blob/main/docs/structures.md)
+- [mini-sglang sampling: greedy, temperature scaling, and softmax](https://github.com/sgl-project/mini-sglang/blob/main/python/minisgl/engine/sample.py)
 - [SGLang scheduler source](https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/managers/scheduler.py)

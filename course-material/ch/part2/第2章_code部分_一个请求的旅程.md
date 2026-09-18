@@ -199,12 +199,29 @@ def _forward(self, forward_input: ForwardInput) -> ForwardOutput:
 # engine/engine.py（简化）
 def forward_batch(self, batch, args):
     logits = self.model.forward()                     # 前向：算出候选 token 的分数
-    next_tokens = self.sampler.sample(logits, args)   # 采样：从分布里挑一个 token
+    next_tokens = self.sampler.sample(logits, args)   # 内部处理 softmax 和 token 选择
     next_tokens_cpu = next_tokens.to("cpu", non_blocking=True)   # 结果拷回 CPU
     ...
 ```
 
-logits 可以理解为模型给词表中每个候选 token 打的分，还不是概率。greedy 直接选分数最高的；带温度的采样则先调整分数、转换成概率，再抽取一个 token。下一章会动手写前向和生成循环，到时再仔细看这两步。
+其中，logits 是模型给词表中每个候选 token 打的分，还不是概率。经过 softmax，这些分数才变成总和为 1 的概率。最终选哪个 token，则取决于采样方法：greedy 直接取分数最高的 token；带温度的随机采样先用温度调整 logits，再经过 softmax，最后按概率抽取一个 token。
+
+上面的 `sample(logits, args)` 把这几步封装在了函数内部，并不是拿 logits 当概率直接抽样。打开 [`engine/sample.py`](https://github.com/sgl-project/mini-sglang/blob/main/python/minisgl/engine/sample.py)，把这层调用展开后，可以简化成下面的形式。这里的 `sampling` 指 `flashinfer.sampling`，省略了 top-k、top-p 等分支：
+
+```python
+# engine/sample.py（简化，合并 sample 与 sample_impl 的逻辑）
+def sample(self, logits, args):
+    if args.temperatures is None:                      # 整批请求都使用 greedy
+        return torch.argmax(logits, dim=-1)
+    probs = sampling.softmax(logits.float(), args.temperatures)  # 温度缩放 + softmax
+    return sampling.sampling_from_probs(probs)         # 按概率抽取 token
+```
+
+greedy 不需要真的算一遍 softmax，因为它不会改变分数的大小顺序，直接取 logits 的最大值就能得到同一个 token。随机采样则需要概率分布，图中把这两条路径分开画了出来：
+
+<img src="./images/2-2-logits与采样.png" width="800" alt="logits 通过 greedy 直接取最大值，或经温度缩放和 softmax 后按概率采样，得到下一个 token">
+
+图中的随机采样路径只展示温度与 softmax，暂不展开 top-k、top-p。下一章会动手写前向和生成循环，到时再仔细看这几步。
 
 如果想继续往下读，模型结构在 `models/`，attention 的实现在 `attention/`。engine 里还包含 CUDA Graph、异步拷贝等优化，目前先不展开。
 
@@ -264,4 +281,5 @@ SGLang 还要处理 LoRA 加载、权重更新、多模态输入等情况，代�
 
 - [mini-sglang 源码](https://github.com/sgl-project/mini-sglang)
 - [mini-sglang 架构文档](https://github.com/sgl-project/mini-sglang/blob/main/docs/structures.md)
+- [mini-sglang 采样实现：greedy、温度缩放与 softmax](https://github.com/sgl-project/mini-sglang/blob/main/python/minisgl/engine/sample.py)
 - [SGLang 调度器源码](https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/managers/scheduler.py)

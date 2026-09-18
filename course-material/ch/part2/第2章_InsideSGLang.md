@@ -37,7 +37,7 @@ scheduler 是调度器。新请求进入等待队列后，由它决定下一步�
 
 真正执行模型前向和采样的是 engine。scheduler 决定“算谁”，engine 负责“怎么算”。在 mini-sglang 中，两者位于同一个进程，scheduler 直接调用 engine；模块边界不一定就是进程边界。
 
-模型前向输出 logits，也就是词表中各个候选 token 的分数。采样器根据这些分数选出下一个 token：greedy 选择分数最高的候选，随机采样则根据采样参数构造概率分布后抽取。新 token 接回请求的序列，作为下一步生成的上下文。
+模型前向输出 logits，也就是词表中各个候选 token 的分数，还不是概率。采样器根据这些分数选出下一个 token：greedy 直接选择分数最高的候选；带温度的随机采样先调整 logits，再用 softmax 转成概率，最后按概率抽取。新 token 接回请求的序列，作为下一步生成的上下文。
 
 ### 2.4 detokenizer 把 token 转回文字
 
@@ -53,30 +53,9 @@ detokenizer 将新生成的 token ids 转换成文字。这里不能简单地把
 
 ### 2.6 把整条链路串起来
 
-下面的时序图对应 mini-sglang 的请求流程。为了突出分工，图中分别画出了 scheduler 和 engine；它们之间是进程内调用。
+下面把请求经过的模块画在一起。图的左右两端是同一个 API Server；scheduler 与 engine 放在同一个框内，表示它们运行在同一进程，通过函数调用配合。生成循环每产生一个新 token，就会把结果交给 detokenizer，再由前台返回新增文字。
 
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant A as 前台 API Server
-    participant T as tokenizer
-    participant S as scheduler
-    participant E as engine
-    participant D as detokenizer
-
-    U->>A: 文本 + 生成参数
-    A->>T: 文本 + 请求标识
-    T->>S: token ids + 请求标识
-    Note over S: 新请求进入等待队列
-    loop 调度与生成，直到请求结束
-        S->>E: 组好的 batch
-        E-->>S: 各请求的新 token
-        S->>D: 新 token + 请求标识 + 结束状态
-        D->>A: 增量文字 + 请求标识 + 结束状态
-        A-->>U: SSE chunk
-    end
-    A-->>U: 完成流式响应
-```
+<img src="./images/2-1-请求流转.png" width="800" alt="请求从 API Server 经 tokenizer 到 scheduler 与 engine，生成 token 后经 detokenizer 回到同一个 API Server；scheduler 与 engine 在同一进程中循环执行">
 
 请求依次经过三次主要的表示转换：输入文本转换成 token ids，模型根据上下文生成新 token，反分词再把输出 token 转回文本。请求标识贯穿整条链路，让各阶段能够关联同一个请求。
 
